@@ -3,6 +3,8 @@ import numpy as np
 def check_array(X):
     if hasattr(X, '__array__'):
         return np.asarray(X)
+    elif isinstance(X, list):
+        return np.array(X)
     else:
         raise ValueError("Array-like needed, 'X' got %s" % type(X))
 

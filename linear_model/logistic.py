@@ -310,7 +310,7 @@ if __name__ == '__main__':
     xx, yy = np.meshgrid(np.arange(x_min, x_max, 0.02), np.arange(y_min, y_max, 0.02))
     Z = classifier1.predict(np.c_[xx.ravel(), yy.ravel()])
     Z = Z.reshape(xx.shape)
-    cs = plt.contourf(xx, yy, Z, alpha=0.2)
+    cs = plt.contourf(xx, yy, Z, alpha=0.5)
     plt.axis('tight')
     colors = [[127/255, 127/255, 227/255], [163/255, 1, 213/255], [1, 127/255, 127/255]]
     for i, color in zip([0, 1, 2], colors):

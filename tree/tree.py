@@ -1,10 +1,15 @@
 from abc import ABCMeta, abstractmethod
 import copy
+import graphviz
+import matplotlib.pyplot as plt
 import numpy as np
+import os
 import pandas as pd
-from utils.validation import Check_X_y, _num_samples
+from sklearn.datasets import load_iris
+from sklearn import tree
+import sys
+from utils.validation import check_array, Check_X_y, _num_samples
 
-# 所有决策树算法暂时不考虑连续变量，sklearn采用的应该是所有属性当连续变量处理然后二分。
 
 def _median(X):
     """生成X相邻元素中位数的数组
@@ -14,8 +19,11 @@ def _median(X):
     :return:
     """
     n_samples = _num_samples(X)
+    if n_samples == 1:
+        yield X[0]
     for i in range(n_samples - 1):
         yield (X[i] + X[i + 1]) / 2
+        # yield float('%.2f' % ((X[i] + X[i + 1]) / 2))
 
 class Node(object):
     __metaclass__ = ABCMeta
@@ -26,7 +34,7 @@ class Node(object):
         self.y = y  # 训练集对应的样本分类
         n_samples, n_features = X.shape
         classifiers, count = np.unique(y, return_counts=True)
-        self.freq_max_y = classifiers[0]  # 该节点中样本最多的类，主要在predict中使用
+        self.freq_max_y = classifiers[0] if len(classifiers) > 0 else classifiers # 该节点中样本最多的类，主要在predict中使用
         self.n_samples = n_samples  # 训练集数量
         self.child = {}  # 训练集的子节点，由split动态生成
         if not attributes:
@@ -35,7 +43,7 @@ class Node(object):
         features = list(range(n_features))
         self.features = features
         self.split_features = None
-        self.split_features = self.attributes[0]  # 训练集的最优划分属性
+        # self.split_features = self.attributes[0]  # 训练集的最优划分属性
         self.classifier = classifiers[0] if len(classifiers) == 1 else None  # 该节点所对应的类别，如果y中有不止一个分类则返回None
         # self.feature_chosen = np.zeros(n_features, dtype=bool)
         self.feature_chosen = [False] * n_features  # 用来保存已经用来分割过的属性集
@@ -220,12 +228,16 @@ class NodeByC4_dot_5(Node):
         :param features_k:
         :return:
         """
-        n_samples, _ = X.shape
+        n_samples, _ = self.X.shape
         _, value_samples = np.unique(self.X[:, features_k], return_counts=True)
         value_samples_freq = value_samples / n_samples
         return -np.sum(value_samples_freq * np.log2(value_samples_freq))
 
     def gain_ratio(self, features_k, value_v):
+        gain = self.gain(features_k, value_v)
+        IV = self._IV(features_k)
+        if not gain or not IV:
+            return 0
         return self.gain(features_k, value_v) / self._IV(features_k)
 
     def fit(self):
@@ -244,10 +256,11 @@ class NodeByC4_dot_5(Node):
                 self.child[each_child].fit()
 
     def set_split_features(self, features_k, value_v):
-        self.split_features = self.features[features_k][value_v]
+        self.split_features = (features_k, value_v)
+        # self.split_features = self.features[features_k][value_v]
         for i, (attr, each) in enumerate(self._feature_choose(features_k, value_v)):
             self.child[attr] = each
-            self.child[attr].feature_chosen = copy.copy(self.feature_chosen)
+            self.child[attr].feature_chosen = copy.deepcopy(self.feature_chosen)
             while value_v < len(self.feature_chosen[features_k]) and value_v >= 0:
                 self.child[attr].feature_chosen[features_k][value_v] = True
                 if not i:
@@ -258,34 +271,93 @@ class NodeByC4_dot_5(Node):
 
 class DecisionTreeClassifier(object):
 
-    def __init__(self, criterion='entropy'):
+    def __init__(self, criterion='ID3', attributes=None):
         self.criterion = criterion
+        self.attributes = attributes
 
     def fit(self, X, y):
-        self.tree_ = NodeByID3(X, y)
+        if self.criterion == 'ID3':
+            self.tree_ = NodeByID3(X, y, attributes=self.attributes)
+        elif self.criterion == 'C4.5':
+            self.tree_ = NodeByC4_dot_5(X, y, attributes=self.attributes)
         self.tree_.fit()
 
     def predict(self, X):
         if not hasattr(self, 'tree_') or self.tree_ is None:
             raise TypeError("This {}s instance is not fitted yet.".format(type(self).__name__))
-        currNode = self.tree_
-        while not currNode.classifier:  # 节点不是叶节点
-            attr = X[currNode.attributes.index(currNode.split_features)]
-            if currNode.child[attr]:
+        X = check_array(X)
+        if len(X.shape) == 1:
+            X = X.reshape(1, -1)
+        res = np.zeros(X.shape[0], dtype=self.tree_.y.dtype)
+        for i, e in enumerate(X):
+            currNode = self.tree_
+            while currNode.classifier is None:  # 节点不是叶节点
+                features_k, value_v = currNode.split_features
+                if e[features_k] <= currNode.features[features_k][value_v]:
+                    symbol = "<="
+                else:
+                    symbol = ">"
+                attr = "{} {} {}".format(currNode.attributes[features_k], symbol, currNode.features[features_k][value_v])
+                # attr = X[currNode.attributes.index(currNode.split_features)]
                 currNode = currNode.child[attr]
-            else:
-                # 若分支节点中没有对应的属性值，则该样本标记为该分支节点中样本最多的类
-                return currNode.freq_max_y
-        return currNode.classifier
+                # if currNode.child[attr]:
+                #     currNode = currNode.child[attr]
+                # else:
+                #     # 若分支节点中没有对应的属性值，则该样本标记为该分支节点中样本最多的类
+                #     return currNode.freq_max_y
+            res[i] = currNode.classifier
+        return res
 
 if __name__ == '__main__':
     # watermelon_data = pd.read_csv("watermelon_data_2.csv")
-    watermelon_data = pd.read_csv(r"..\linear_model\water_melon.csv", encoding='gbk')
-    X, y = watermelon_data.values[:, :-1], watermelon_data.values[:,-1]
-    # a = NodeByID3(X, y, attributes=['色泽', '根蒂', '敲声', '纹理', '脐部', '触感'])
-    # a.fit()
-    a = NodeByC4_dot_5(X, y, attributes=['密度', '含糖率'])
-    a.fit()
-    # for i in range(6):
-    #     print(a._IV(i))
-    pass
+    # watermelon_data = pd.read_csv(r"..\linear_model\water_melon.csv", encoding='gbk')
+    # X, y = watermelon_data.values[:, :-1], watermelon_data.values[:,-1]
+    iris = load_iris()
+    # X = iris.data[50:, :2]
+    # y = iris.target[50:]
+    X = iris.data[:, :2]
+    # X, index = np.unique(X, axis=0, return_index=True)
+    # mean = X.mean(axis=0)
+    # std = X.std(axis=0)
+    # X = (X - mean) / std
+    y = iris.target
+    # # a = NodeByID3(X, y, attributes=['色泽', '根蒂', '敲声', '纹理', '脐部', '触感'])
+    # # a.fit()
+    # # a = NodeByC4_dot_5(X, y, attributes=['密度', '含糖率'])
+    # # a.fit()
+    # classifier1 = DecisionTreeClassifier(criterion='C4.5', attributes=['index', 'sepal_length', 'sepal_width'])
+    # classifier1.fit(X, y)
+    # x_min, x_max = X[:, 0].min() - 1, X[:, 0].max() + 1
+    # y_min, y_max = X[:, 1].min() - 1, X[:, 1].max() + 1
+    # xx, yy = np.meshgrid(np.arange(x_min, x_max, 0.02), np.arange(y_min, y_max, 0.02))
+    # Z = classifier1.predict(np.c_[xx.ravel(), yy.ravel()])
+    # Z = Z.reshape(xx.shape)
+    # # index = (Z == '是')
+    # # Z[index] = 1
+    # # Z[~index] = 0
+    # # Z.astype('int')
+    # cs = plt.contourf(xx, yy, Z, alpha=0.5)
+    # plt.axis('tight')
+    # colors = [[127 / 255, 127 / 255, 227 / 255], [163 / 255, 1, 213 / 255], [1, 127 / 255, 127 / 255]]
+    # for i, color in zip([0, 1, 2], colors):
+    #     idx = np.where(y == i)
+    #     plt.scatter(X[idx, 0], X[idx, 1], c=color)
+    # # for i in range(6):
+    # #     print(a._IV(i))
+    # plt.show()
+    os.environ['path'] += os.pathsep + r"D:\suyako-to-be-coder\graphviz\bin"
+    # iris = load_iris()
+    clf = tree.DecisionTreeClassifier(criterion="entropy")
+    # X = np.column_stack((np.arange(150), iris.data[:, :2]))
+    clf = clf.fit(X, y)
+    dot_data = tree.export_graphviz(clf, out_file=None)
+    graph = graphviz.Source(dot_data)
+    graph.render("iris")
+    # dot_data = tree.export_graphviz(clf, out_file=None,  # doctest: +SKIP
+    #                                 feature_names=iris.feature_names[:2],  # doctest: +SKIP
+    #                                 class_names=iris.target_names,  # doctest: +SKIP
+    #                                 filled=True, rounded=True,  # doctest: +SKIP
+    #                                 special_characters=True)
+    # graph = graphviz.Source(dot_data)
+    # graph.render("iris")
+    # graph
