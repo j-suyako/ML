@@ -27,10 +27,20 @@ class MLPClassifier(object):
     def _backprop(self, X, y):
         """暂时只写X只有一个样本的情况，默认y已转为one hot vector
 
-        如果我们称某连接的权重为w(j_kl)，可以理解为第j层网络上，
-        输入层第k个节点与输出层第l个节点的连接的权重。
+        这里给一个反向传播的初步解释：
+        对第l层上的第j个节点来说，对该节点的输入值（即未激活前）一个小的扰动Delta_Z_l^j，则损失函数变化
+        Delta_cost = fai_cost / fai_Z_j^l * Delta_Z_j^l
+        在这里我们称fai_cost / fai_Z_j^l为该节点内含的误差delta_j^l（与常规认识的误差有概念上的区别）
+        随着网络的不断前进，前一层的节点误差会不断重分布在下一层节点上，这意味着前后两层的误差是可以互推的，
+        反向传播就是一种通过后一层误差反向推导出前一层误差的方法。
 
-        对于最后一层隐层与输出层的
+        显然我们的最终目标是让delta_j^l达到0，而为了让其达到0我们需要不断调整权重，所以最终目标转换为
+        让损失函数对所有权重的偏导为0，损失函数对权重的偏导可由delta_j^l推导得出。设第l-1层上的第k个节点
+        与第l层上的第j个节点连接的权重为w_kj^l，其引起的第l层上第j个节点输入值的变化为w_kj^l * a_k^(l-1)，
+        所以最终引起的损失函数变化为delta_j^i * w_kj^l * a_k^(l-1)，所以损失函数对w_kj^l的偏导就为
+        delta_j^i * a_k^(l-1)。
+
+        更详细的解释见ref: http://neuralnetworksanddeeplearning.com/chap2.html
         :param X:
         :param y:
         :return:
