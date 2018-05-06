@@ -1,5 +1,5 @@
 import numpy as np
-from ..utils.validation import check_array
+from utils.validation import check_array
 
 def scale(X, axis=0):
     X = check_array(X)

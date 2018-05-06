@@ -1,4 +1,5 @@
 import numpy as np
+from utils.validation import _num_samples
 
 def logistic(X):
     """激活函数
@@ -11,3 +12,10 @@ def logistic(X):
     X[index] = 1 / (1 + np.exp(-X[index]))
     X[~index] = 1 - 1 / (1 + np.exp(X[~index]))
     return X
+
+def shuffle(X, y, max_iter=100):
+    n_samples = _num_samples(X)
+    for iter in range(max_iter):
+        index = np.arange(n_samples)
+        np.random.shuffle(index)
+        yield X[index], y[index]

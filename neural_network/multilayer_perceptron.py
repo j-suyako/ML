@@ -1,20 +1,18 @@
 import numpy as np
-import matplotlib.pyplot as plt
-from sklearn.datasets import make_moons, make_circles, make_classification
-from ._base import logistic
-from ..preprocessing.data import scale
-from ..utils.validation import check_array, Check_X_y, _num_samples
+from ._base import logistic, shuffle
+from utils.validation import check_array, Check_X_y, _num_samples
 
-
+np.random.uniform()
 class MLPClassifier(object):
     """多层感知机
 
     """
     def __init__(self, hidden_layer_sizes=(3,), activation='logistic',
-                 solver='sgd'):
+                 solver='sgd', max_iter=100):
         self.hidden_layer_sizes = hidden_layer_sizes
         self.activation = activation
         self.solver = solver
+        self.max_iter = max_iter
 
     def _init_coef(self, fan_in, fan_out):
         """初始化权重
@@ -25,7 +23,9 @@ class MLPClassifier(object):
         :param fan_out: 作为输出层的神经网络节点数
         :return:
         """
-        coef_ = np.random.random((fan_in + 1, fan_out))
+        bound = np.sqrt(2 / (fan_in + fan_out))
+        coef_ = np.random.uniform(-bound, bound, (fan_in, fan_out))
+        # coef_ = np.random.random((fan_in, fan_out))
         return coef_
 
     def _backprop(self, X, y):
@@ -51,39 +51,92 @@ class MLPClassifier(object):
         """
         if not hasattr(self, 'coef_') or not self.coef_:
             raise TypeError()
-        index = np.arange(X.shape[0])
-        np.random.shuffle(index)
-        X = X[index]  # 为之后的批量梯度下降对X进行重排
-        y = y[index]
-        errs = [np.zeros(0)] * self.n_layers
+        # index = np.arange(X.shape[0])
+        # np.random.shuffle(index)
+        # X = X[index]  # 为之后的批量梯度下降对X进行重排
+        # y = y[index]
+        errs = []
+        for i in range(self.n_layers - 1):
+            errs.append(np.zeros(self.coef_[i].shape[0] - 1))
+        errs.append(np.zeros(self.coef_[self.n_layers - 2].shape[1]))
         costs = list()
-        for loop in range(100):
-            costs.append(self._cost(X=X, y=y)) # 获得在此时的权重矩阵下神经网络的损失
-            x = X[loop]  # 选取X中的一个样本，这里loop只是先写着（因为方便）
-            activations = [np.r_[x, 1]]  # 考虑常量
-            activations = self._forward_pass(activations)  # 获得网络上所有节点的激活值
-            for i in range(self.n_layers - 1, -1, -1):
-                # 依靠误差反向传播获得每层节点的误差
-                if i == self.n_layers - 1:
-                    errs[i] = (activations[i] - y[loop]) * activations[i] * (1 - activations[i])
-                errs[i] = np.dot(self.coef_[i + 1].T, errs[i + 1]) * activations[i] * (1 - activations[i])
+        # flag = False
+        # for shuffleX, shuffley in shuffle(X, y, max_iter=self.max_iter):
+        #     n_samples = _num_samples(shuffleX)
+        #     for loop in range(n_samples):
+        #         costs.append(self._cost(X=X, y=y))  # 获得在此时的权重矩阵下神经网络的损失
+        #         # if loop > 2 and abs(costs[-1] - costs[-2]) < 1e-5:
+        #         #     flag = True
+        #             # break
+        #         x = shuffleX[loop]  # 选取X中的一个样本，这里loop只是先写着（因为方便）
+        #         activations = [np.r_[x, 1]]  # 考虑常量
+        #         activations = self._forward_pass(activations)  # 获得网络上所有节点的激活值
+        #         for i in range(self.n_layers - 1, -1, -1):
+        #             # 依靠误差反向传播获得每层节点的误差
+        #             if i == self.n_layers - 1:
+        #                 errs[i] = (activations[i] - shuffley[loop]) * activations[i] * (1 - activations[i])
+        #             else:
+        #                 errs[i] = np.dot(self.coef_[i][:-1], errs[i + 1]) * activations[i][:-1] * (
+        #                             1 - activations[i][:-1])
+        #         for i in range(self.n_layers - 1):
+        #             # 由每层节点的误差对权重矩阵进行更新，以下写成了矩阵形式
+        #             left = np.tile(activations[i][:-1], (errs[i + 1].shape[0], 1)).T
+        #             right = np.tile(errs[i + 1], (activations[i].shape[0] - 1, 1))
+        #             grad = left * right
+        #             self.coef_[i][:-1] -= 0.1 * grad
+        #             self.coef_[i][-1] -= 0.1 * errs[i + 1]
+        #     # if flag:
+        #     #     break
+        # if abs(costs[-1] - costs[-2]) >= 1e-5:
+        #     print("Please increase your iter number.")
+        for loop in range(500):
+            grad = []
             for i in range(self.n_layers - 1):
-                # 由每层节点的误差对权重矩阵进行更新，以下写成了矩阵形式
-                left = np.tile(activations[i], (errs[i + 1].shape[0], 1)).T
-                right = np.tile(errs[i + 1], (activations[i].shape[0], 1))
-                grad = left * right
-                self.coef_[i] -= 0.02 * grad
-        # lvs = self.layer_values
-        # for i in range(self.n_layers - 1, 0, -1):
-        #     grads = np.zeros_like(self.coef_[i])
-        #     if i == self.n_layers - 1:
-        #         for h, grad in enumerate(grads):
-        #             # delta_w_hj = n * g_j * b_h，其中g_j = y_j_hat * (1 - y_j_hat) * (y_j - y_j_hat)
-        #             # 这里y_j_hat是预测值，y_j是实际值
-        #             grad = 0.1 * lvs[-1] * (1 - lvs[-1]) * (y - lvs[-1]) * lvs[-2][h]
-        #     else:
-        #         # fai_E_k / fai_V_ih = (sum(fai_E_k / fai_w_hj * w_hj) * (1 - b_h))
-        #         pass # TODO(suyako): 实现向后传播
+                grad.append(np.zeros_like(self.coef_[i]))
+            costs.append(self._cost(X=X, y=y)) # 获得在此时的权重矩阵下神经网络的损失
+            for j, x in enumerate(X):
+                activations = [np.r_[x, 1]]  # 考虑常量
+                activations = self._forward_pass(activations)  # 获得网络上所有节点的激活值
+                for i in range(self.n_layers - 1, 0, -1):
+                    # 依靠误差反向传播获得每层节点的误差
+                    if i == self.n_layers - 1:
+                        errs[i] = (activations[i] - y[j]) * activations[i] * (1 - activations[i])
+                    else:
+                        errs[i] = np.dot(self.coef_[i][:-1], errs[i + 1]) * activations[i][:-1] * (
+                                    1 - activations[i][:-1])
+                        # errs[i][-1] = np.dot(self.coef_[i][-1], errs[i + 1][-1]) * activations[i][-1] * (1 - activations[i][-1])
+                    left = np.tile(activations[i - 1], (errs[i].shape[0], 1)).T
+                    right = np.tile(errs[i], (activations[i - 1].shape[0], 1))
+                    grad[i - 1] += left * right
+            for i in range(self.n_layers - 1):
+                self.coef_[i] -= 0.3 * grad[i] / 100
+        pass
+                # for i in range(self.n_layers - 1):
+                #     # 由每层节点的误差对权重矩阵进行更新，以下写成了矩阵形式
+                #     left = np.tile(activations[i], (errs[i + 1].shape[0], 1)).T
+                #     right = np.tile(errs[i + 1], (activations[i].shape[0], 1))
+                #     grad = left * right
+                #     # np.dot(activations[i][:-1], errs[i + 1])
+                #     self.coef_[i] -= 0.1 * grad / 100
+            # x = X[loop]  # 选取X中的一个样本，这里loop只是先写着（因为方便）
+            # activations = [np.r_[x, 1]]  # 考虑常量
+            # activations = self._forward_pass(activations)  # 获得网络上所有节点的激活值
+            # for i in range(self.n_layers - 1, -1, -1):
+            #     # 依靠误差反向传播获得每层节点的误差
+            #     if i == self.n_layers - 1:
+            #         errs[i] = (activations[i] - y[loop]) * activations[i] * (1 - activations[i])
+            #     else:
+            #         errs[i] = np.dot(self.coef_[i][:-1], errs[i + 1]) * activations[i][:-1] * (1 - activations[i][:-1])
+            #         # errs[i][-1] = np.dot(self.coef_[i][-1], errs[i + 1][-1]) * activations[i][-1] * (1 - activations[i][-1])
+            # for i in range(self.n_layers - 1):
+            #     # 由每层节点的误差对权重矩阵进行更新，以下写成了矩阵形式
+            #     left = np.tile(activations[i][:-1], (errs[i + 1].shape[0], 1)).T
+            #     right = np.tile(errs[i + 1], (activations[i].shape[0] - 1, 1))
+            #     grad = left * right
+            #     # np.dot(activations[i][:-1], errs[i + 1])
+            #     self.coef_[i][:-1] -= 0.1 * grad
+            #     self.coef_[i][-1] -= 0.1 * errs[i + 1]
+
 
     def _forward_pass(self, activations):
         """输入值在神经网络中进行传递，获得每层的激活值
@@ -93,7 +146,7 @@ class MLPClassifier(object):
         """
         for i, coef in enumerate(self.coef_):
             unactivation = np.dot(coef.T, activations[i])
-            activations.append(np.r_[logistic(unactivation), 1] if i < self.n_layers - 1 else unactivation)
+            activations.append(np.r_[logistic(unactivation), 1] if i < self.n_layers - 2 else logistic(unactivation))
         return activations
 
     def _cost(self, X, y):
@@ -106,36 +159,52 @@ class MLPClassifier(object):
         """
         cost = 0
         for i, x in enumerate(X):
-            activations = np.r_[x, 1]
+            activations = [np.r_[x, 1]]
             y_hat = self._forward_pass(activations)[-1]
             cost += np.sum((y_hat - y[i]) * (y_hat - y[i])) / 2
         return cost
+
+    @staticmethod
+    def one_hot_vector(y):
+        y = check_array(y)
+        n_samples = _num_samples(y)
+        labels = np.unique(y)
+        label_dict = dict()
+        for i, label in enumerate(labels):
+            label_dict[label] = i
+        res = np.zeros((n_samples, len(labels)))
+        for i, e in enumerate(res):
+            e[label_dict[y[i]]] = 1
+        return res
 
     def fit(self, X, y):
         """暂时只认为X只有一个样本来做
 
         """
         X, y = Check_X_y(X, y)
-        n_samples, n_features = _num_samples(X)
-        labels = len(np.unique(y))
+        n_samples= _num_samples(X)
+        y = self.one_hot_vector(y)
         self.coef_ = []
         # self.layer_values = [X]
-        input_layer_size = n_features  # TODO(suyako): +1?
-        output_layer_size = labels
+        input_layer_size = X.shape[1]  # TODO(suyako): +1?
+        output_layer_size = y.shape[1]
         hidden_layer_sizes = list(self.hidden_layer_sizes)
         layer_units = ([input_layer_size] + hidden_layer_sizes + [output_layer_size])
         self.n_layers = len(layer_units)
         for i in range(self.n_layers - 1):
-            coef_ = self._init_coef(layer_units[i], layer_units[i + 1])
+            coef_ = self._init_coef(layer_units[i] + 1, layer_units[i + 1])
             self.coef_.append(coef_)  # TODO(suyako): 暂时构建到系数矩阵
         self._backprop(X, y)  # 反向传播更新权重矩阵
             # layer_value = np.dot(coef_.T, self.layer_values[i])
             # self.layer_values.append(layer_value)
         # 第一次神经网络遍历
 
-if __name__ == '__main__':
-    X, y = make_moons(noise=0.3, random_state=0)
-    figure = plt.figure(figsize=(17, 9))
-    X = scale(X)
-    classifier1 = MLPClassifier()
-    classifier1.fit(X, y)
+    def predict(self, X):
+        if not hasattr(self, "coef_") or self.coef_ is None:
+            raise TypeError()
+        Z = np.zeros(X.shape[0])
+        for i, x in enumerate(X):
+            activations = [np.r_[x, 1]]
+            y_hat = self._forward_pass(activations)[-1]
+            Z[i] = np.where(y_hat == np.max(y_hat))[0][0]
+        return Z
