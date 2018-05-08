@@ -24,7 +24,8 @@ class MLPClassifier(object):
         :return:
         """
         bound = np.sqrt(2 / (fan_in + fan_out))
-        coef_ = np.random.uniform(-bound, bound, (fan_in, fan_out))
+        # coef_ = np.random.uniform(-bound, bound, (fan_in, fan_out))
+        coef_ = np.random.mtrand._rand.uniform(-bound, bound, (fan_in, fan_out))
         # coef_ = np.random.random((fan_in, fan_out))
         return coef_
 
@@ -89,7 +90,7 @@ class MLPClassifier(object):
         #     #     break
         # if abs(costs[-1] - costs[-2]) >= 1e-5:
         #     print("Please increase your iter number.")
-        for loop in range(500):
+        for loop in range(100):
             grad = []
             for i in range(self.n_layers - 1):
                 grad.append(np.zeros_like(self.coef_[i]))
@@ -100,7 +101,7 @@ class MLPClassifier(object):
                 for i in range(self.n_layers - 1, 0, -1):
                     # 依靠误差反向传播获得每层节点的误差
                     if i == self.n_layers - 1:
-                        errs[i] = (activations[i] - y[j]) * activations[i] * (1 - activations[i])
+                        errs[i] = (activations[i] - y[j])# * activations[i] * (1 - activations[i])
                     else:
                         errs[i] = np.dot(self.coef_[i][:-1], errs[i + 1]) * activations[i][:-1] * (
                                     1 - activations[i][:-1])
@@ -109,7 +110,7 @@ class MLPClassifier(object):
                     right = np.tile(errs[i], (activations[i - 1].shape[0], 1))
                     grad[i - 1] += left * right
             for i in range(self.n_layers - 1):
-                self.coef_[i] -= 0.3 * grad[i] / 100
+                self.coef_[i] -= 0.1 * grad[i] / 100
         pass
                 # for i in range(self.n_layers - 1):
                 #     # 由每层节点的误差对权重矩阵进行更新，以下写成了矩阵形式
@@ -161,7 +162,8 @@ class MLPClassifier(object):
         for i, x in enumerate(X):
             activations = [np.r_[x, 1]]
             y_hat = self._forward_pass(activations)[-1]
-            cost += np.sum((y_hat - y[i]) * (y_hat - y[i])) / 2
+            # cost += np.sum((y_hat - y[i]) * (y_hat - y[i])) / 2
+            cost += np.sum(np.nan_to_num(-y[i] * np.log(y_hat) - (1 - y[i]) * np.log(1 - y_hat)))
         return cost
 
     @staticmethod
