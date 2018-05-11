@@ -29,9 +29,9 @@ class SVC(object):
         alphas = np.zeros(n_samples)
         b = 0
         C = self.C
+        w = np.dot(X.T, alphas * y)
         for iter_num in range(100):
             for i, alpha1 in enumerate(alphas):
-                w = np.dot(X.T, alphas * y)
                 cost = np.dot(w.T, w) / 2 - np.sum(alphas)
                 u1 = np.dot(X[i, :], w) - b
                 E1 = u1 - y[i]
@@ -50,6 +50,19 @@ class SVC(object):
                 K12 = linear(X[i, :], X[j, :])
                 enta = K11 + K22 - 2 * K12  # 二阶导数
                 alphas[j] = self._clip_alpha(alpha2 + y[j] * (E1 - E2) / enta, L, H)
-                alpha1[i] += y[i] * y[j] * (alpha2 - alphas[j])
+                alphas[i] += y[i] * y[j] * (alpha2 - alphas[j])
+                b1 = E1 + y[i] * (alphas[i] - alpha1) * K11 + y[j] * (alphas[j] - alpha2) * K12 + b
+                b2 = E2 + y[i] * (alphas[i] - alpha1) * K12 + y[j] * (alphas[j] - alpha2) * K22 + b
+                if 0 < alphas[i] and C > alphas[i]:
+                    # this condition means X[i] is the support vector, thus w.T * X[i] + b = y[i]
+                    b = b1
+                elif 0 < alphas[j] and C > alphas[j]:
+                    # this condition means X[j] is the support vector, thus w.T * X[j] + b = y[j]
+                    b = b2
+                else:
+                    # this means X[i] and X[j] neither to be the support vector, then the hyperplane between
+                    # with the hyperplanes corresponding to X[i] & X[j] are consistent with the KKT conditions.
+                    b = (b1 + b2) / 2
+                w += y[i] * (alphas[i] - alpha1) * X[i, :] + y[j] * (alphas[j] - alpha2) * X[j, :]
         w = np.dot(X.T, alphas * y)
         return w
