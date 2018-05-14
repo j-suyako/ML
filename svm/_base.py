@@ -2,7 +2,7 @@ import numpy as np
 from utils.validation import _num_samples
 
 
-def select(i, X, error):
+def select(i, errors, none_bound_alphas):
     """启发式选择第二个代更新alpha的index
 
     选择方式依据如下：
@@ -16,13 +16,15 @@ def select(i, X, error):
     if not isinstance(i, int):
         raise TypeError()
     # n_samples = _num_samples(X)
-    if error[i] > 0:
-        j = np.where(error == min(error))
+    if errors[i] > 0:
+        j = np.where(errors == min(errors[none_bound_alphas]))
     else:
-        j = np.where(error == max(error))
+        j = np.where(errors == max(errors[none_bound_alphas]))
     # j = i
     # while j == i:
     #     j = np.random.randint(0, n_samples)
+    if isinstance(j, tuple):
+        j = j[0][0]
     return j
 
 
