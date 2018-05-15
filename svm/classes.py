@@ -132,13 +132,13 @@ class SVC(object):
             h1 = alpha1 + s * (alpha2 - high)
             fai__l = l1 * f1 + low * f2 + l1 ** 2 * k11 / 2 + low ** 2 * k22 / 2 + s * low * l1 * k12
             fai__h = h1 * f1 + high * f2 + h1 ** 2 * k11 / 2 + high ** 2 * k22 / 2 + s * high * h1 * k12
-            if fai__l < fai__h:
+            if fai__l < fai__h - 0.001:
                 alpha2_new = low
-            elif fai__l > fai__h:
+            elif fai__l > fai__h + 0.001:
                 alpha2_new = high
             else:
                 alpha2_new = alpha2
-        if abs(alpha2 - alpha2_new) < 0.0001:
+        if abs(alpha2 - alpha2_new) < 0.001 * (alpha2 + alpha2_new + 0.001):  # 这一步不太明白具体是什么操作，论文给的伪代码是这么写的
             return False
         alpha1_new = alpha1 + s * (alpha2 - alpha2_new)
         alphas[i], alphas[j] = alpha1_new, alpha2_new
