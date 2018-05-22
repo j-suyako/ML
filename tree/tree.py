@@ -1,4 +1,5 @@
 from abc import ABCMeta, abstractmethod
+import collections
 import copy
 import numpy as np
 from queue import Queue
@@ -38,6 +39,8 @@ class Node(object):
         self.split_features = None
         self.features = list()
         self.feature_chosen = list()
+        self.loc = list()
+        self.criterion = ""
 
     def ent(self):
         """该样本集合的信息熵
@@ -52,26 +55,67 @@ class Node(object):
             entropy_of_sample -= p_each * np.log2(p_each)
         return entropy_of_sample
 
-    @abstractmethod
-    def _feature_choose(self, *args):
-        pass
+    def _feature_choose(self, loc) -> collections.Iterable:
+        """选择X的第k个属性进行分割，生成Dv
 
-    def gain(self, *args):
+        假设根据第k个属性，原样本可以被划分为m个集合，则每次for循环生成
+        其中一个叶节点集合
+        :param loc:
+        :return:
+        """
+        if hasattr(loc, "__len__"):
+            features_k, value_v = loc
+            if features_k < 0 or features_k >= len(self.features):
+                raise ValueError("No such features.")
+            if value_v < 0 or value_v >= len(self.features[features_k]):
+                raise ValueError("No such value in that features.")
+            for i in range(2):
+                index = (self.X[:, features_k] <= self.features[features_k][value_v])
+                if not i:
+                    X = self.X[index]
+                    y = self.y[index]
+                    attr = "X[{}] <= {}".format(features_k, self.features[features_k][value_v])
+                else:
+                    X = self.X[~index]
+                    y = self.y[~index]
+                    attr = "X[{}] > {}".format(features_k, self.features[features_k][value_v])
+                yield attr, NodeByC4_dot_5(X, y, self.depth + 1, self.max_depth)
+        else:
+            if loc < 0 or loc >= len(self.features):
+                raise ValueError("No such features.")
+            for attr in self.features[loc]:
+                attr = "X[{}] = {}".format(loc, attr)
+                index = (self.X[:, loc] == attr)
+                X = self.X[index]  # 找到每个属性值包含的训练集
+                y = self.y[index]  # 该属性值包含的训练集对应的类别
+                yield attr, NodeByID3(X, y, self.depth + 1, self.max_depth)
+
+    def gain(self, loc):
         res = self.ent()
-        for _, each in self._feature_choose(*args):
+        for _, each in self._feature_choose(loc):
             res -= each.n_samples / self.n_samples * each.ent()
         return res
 
     @abstractmethod
-    def get_best_split_feature(self):
+    def decision_basis(self, loc) -> float:
         pass
 
+    def get_best_split_feature(self):
+        if self.classifier is not None:
+            raise ValueError()
+        index, _ = max(enumerate(map(self.decision_basis, self.loc)), key=lambda p: p[1])
+        return self.loc[index]  # 选择最优属性
+
     def depth_first_fit(self):
-        if self.classifier is None:
-            best_features = self.get_best_split_feature()
-            self.set_split_features(*best_features)
-            for child in self.children:
-                self.children[child].fit()
+        DFS = list()
+        DFS.append(self)
+        while len(DFS) > 0:
+            currNode = DFS.pop()
+            if currNode.classifier is None:
+                best_features = currNode.get_best_split_feature()
+                currNode.set_split_features(best_features)
+                for child in currNode.children:
+                    DFS.append(currNode.children[child])
 
     def breadth_first_fit(self):
         BFS = Queue()
@@ -81,20 +125,47 @@ class Node(object):
             currNode = BFS.get()
             if currNode.classifier is None:
                 best_features = currNode.get_best_split_feature()  # 选择最优属性
-                currNode.set_split_features(*best_features)  # 用该最优属性进行划分
+                currNode.set_split_features(best_features)  # 用该最优属性进行划分
                 for child in currNode.children:
                     BFS.put(currNode.children[child])
             depth = currNode.depth
 
-    @abstractmethod
-    def set_split_features(self, *args):
-        pass
+    def set_split_features(self, loc):
+        self.split_features = loc
+        (features_k, value_v) = (loc[0], loc[1]) if hasattr(loc, "__len__") else (-1, -1)
+        for i, (attr, each) in enumerate(self._feature_choose(loc)):
+            self.children[attr] = each
+            self.children[attr].feature_chosen = copy.deepcopy(self.feature_chosen)
+            if features_k > -1:
+                while 0 <= value_v < len(self.feature_chosen[features_k]):
+                    self.children[attr].feature_chosen[features_k][value_v] = True
+                    value_v += 1 if not i else -1
+            else:
+                self.children[attr].feature_chosen[loc] = True
 
     def fit(self):
         if self.max_depth is not None:
             self.breadth_first_fit()
         else:
             self.depth_first_fit()
+
+    def __repr__(self):
+        if hasattr(self.split_features, "__len__"):
+            features_k, value_v = self.split_features
+            info = ["X[{}] <= {}"]
+            toshow = [(features_k, self.features[features_k][value_v])]
+        else:
+            info = [{}]
+            toshow = [self.split_features]
+        info.extend(['{} = {}', 'samples = {}', 'classifier = {}'])
+        toshow.extend([(self.criterion, self.decision_basis(self.split_features)), (self.n_samples, ),
+                       (self.classifier, )])
+        for i in range(4):
+            info[i] = info[i].format(*toshow[i])
+        return '[' + '\n'.join(info) + ']'
+
+    def __str__(self):
+        return self.__repr__()
 
 
 class NodeByID3(Node):
@@ -106,59 +177,17 @@ class NodeByID3(Node):
 
     def __init__(self, X, y, depth=0, max_depth=None):
         super(NodeByID3, self).__init__(X, y, depth=depth, max_depth=max_depth)
+        self.criterion = "entropy"
         n_samples, n_features = X.shape
         for i in range(n_features):
             self.features.append(np.unique(X[:, i]))
             self.feature_chosen.append(False)
+            self.loc.append(i)
 
-    def _feature_choose(self, features_k):
-        """选择X的第k个属性进行分割，生成Dv
-
-        假设根据第k个属性，原样本可以被划分为m个集合，则每次for循环生成
-        其中一个叶节点集合
-        :param features_k:
-        :return:
-        """
-        if features_k < 0 or features_k >= len(self.features):
-            raise ValueError("No such features.")
-        for attr in self.features[features_k]:
-            attr = "X[{}] = {}".format(features_k, attr)
-            index = (self.X[:, features_k] == attr)
-            X = self.X[index]  # 找到每个属性值包含的训练集
-            y = self.y[index]  # 该属性值包含的训练集对应的类别
-            yield attr, NodeByID3(X, y, self.depth + 1, self.max_depth)
-
-    def get_best_split_feature(self):
-        if self.classifier is not None:
-            raise ValueError
-        Gain = list()
-        Gain_index = list()
-        for k, _ in enumerate(self.features):
-            # 如果该属性已经在之前被选择过作为划分依据，则跳过
-            if self.feature_chosen[k]:
-                continue
-            Gain.append(self.gain(k))  # 计算每个属性划分所带来的信息增益并存入Gain
-            Gain_index.append(k)  # 同时记录被用来试验的属性的index
-        return Gain_index[Gain.index(max(Gain))]  # 选择最优属性
-
-    def set_split_features(self, features_k):
-        # self.split_features = self.attributes[features_k]
-        self.split_features = features_k
-        for attr, each in self._feature_choose(features_k):
-            self.children[attr] = each  # child中保存由该最优属性划分得到的每个属性值对应的叶节点
-            # self.children[attr].feature_chosen[self.feature_chosen] = True
-            self.children[attr].feature_chosen = copy.copy(self.feature_chosen)
-            self.children[attr].feature_chosen[features_k] = True
-
-    def __repr__(self):
-        info = ['splitter = {}', 'Ent = {}', 'n_samples = {}', 'class = {}']
-        toshow = [self.split_features, self.ent(), self.n_samples, self.classifier]
-        for i in range(4):
-            info[i] = info[i].format(toshow[i])
-        return '[' + '\n'.join(info) + ']'
-
-    def __str__(self):
-        return self.__repr__()
+    def decision_basis(self, loc):
+        if self.feature_chosen[loc]:
+            return 0
+        return self.gain(loc)
 
 
 class NodeByC4_dot_5(Node):
@@ -169,35 +198,16 @@ class NodeByC4_dot_5(Node):
     """
     def __init__(self, X, y, depth=0, max_depth=None):
         super(NodeByC4_dot_5, self).__init__(X, y, depth=depth, max_depth=max_depth)
+        self.criterion = "gain ratio"
         n_samples, n_features = X.shape
         for i in range(n_features):
             values = np.unique(X[:, i])
-            self.features.append(list(_median(values)))
+            feature_i = list(_median(values))
+            self.features.append(feature_i)
             self.feature_chosen.append([False] * len(values))
-
-    def _feature_choose(self, features_k, value_v):
-        """选择X的第k个属性进行分割，生成Dk
-
-        假设根据第k个属性，原样本可以被划分为m个集合，则每次for循环生成
-        其中一个叶节点集合
-        :param features_k:
-        :return:
-        """
-        if features_k < 0 or features_k >= len(self.features):
-            raise ValueError("No such features.")
-        if value_v < 0 or value_v >= len(self.features[features_k]):
-            raise ValueError("No such value in that features.")
-        for i in range(2):
-            index = (self.X[:, features_k] <= self.features[features_k][value_v])
-            if not i:
-                X = self.X[index]
-                y = self.y[index]
-                attr = "X[{}] <= {}".format(features_k, self.features[features_k][value_v])
-            else:
-                X = self.X[~index]
-                y = self.y[~index]
-                attr = "X[{}] > {}".format(features_k, self.features[features_k][value_v])
-            yield attr, NodeByC4_dot_5(X, y, self.depth + 1, self.max_depth)
+            p = [i] * len(feature_i)
+            q = range(len(feature_i))
+            self.loc.extend(list(zip(p, q)))
 
     def _IV(self, features_k):
         """属性k的固有值（intrinsic value）
@@ -212,39 +222,15 @@ class NodeByC4_dot_5(Node):
         value_samples_freq = value_samples / n_samples
         return -np.sum(value_samples_freq * np.log2(value_samples_freq))
 
-    def gain_ratio(self, args):
-        features_k, value_v = args
+    def decision_basis(self, loc):
+        features_k, value_v = loc
         if self.feature_chosen[features_k][value_v]:
             return 0
-        gain = self.gain(*args)
+        gain = self.gain(loc)
         IV = self._IV(features_k)
         if not gain or not IV:
             return 0
         return gain / IV
-
-    def get_best_split_feature(self):
-        if self.classifier is not None:
-            raise ValueError()
-        Gain_ratio_index = list()
-        for i, feature in enumerate(self.features):
-            p = [i] * len(feature)
-            q = range(len(feature))
-            Gain_ratio_index.extend(list(zip(p, q)))
-        index, _ = max(enumerate(map(self.gain_ratio, Gain_ratio_index)), key=lambda p: p[1])
-        return Gain_ratio_index[index]
-
-    def set_split_features(self, features_k, value_v):
-        self.split_features = (features_k, value_v)
-        # self.split_features = self.features[features_k][value_v]
-        for i, (attr, each) in enumerate(self._feature_choose(features_k, value_v)):
-            self.children[attr] = each
-            self.children[attr].feature_chosen = copy.deepcopy(self.feature_chosen)
-            while 0 <= value_v < len(self.feature_chosen[features_k]):
-                self.children[attr].feature_chosen[features_k][value_v] = True
-                if not i:
-                    value_v += 1
-                else:
-                    value_v -= 1
 
 
 class DecisionTreeClassifier(object):
