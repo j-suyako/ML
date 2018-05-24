@@ -1,51 +1,84 @@
 from abc import ABCMeta, abstractmethod
 import collections
-import copy
 import numpy as np
 from queue import Queue
 from utils.validation import check_array, Check_X_y, _num_samples
 
 
 def _median(X):
-    """生成X相邻元素中位数的数组
+    """generate the median of each each neighbor value in X
 
-    一定要记得对X进行排序
-    :param X: 类array数组
-    :return:
+    remember sort X first
+    :param X: array like shape
     """
     n_samples = _num_samples(X)
     if n_samples == 1:
         yield X[0]
     for i in range(n_samples - 1):
         yield (X[i] + X[i + 1]) / 2
-        # yield float('%.2f' % ((X[i] + X[i + 1]) / 2))
 
 
 class Node(object):
     __metaclass__ = ABCMeta
 
-    def __init__(self, X, y, depth=0, max_depth=None):
+    def __init__(self, X, y, depth=0):
+        """Node in a decision tree.
+
+        :param X: X in this node
+        :param y: corresponding y in this node
+        :param depth: depth of this node in the decision tree
+
+        Attributes:
+        -----------
+        n_samples: int,
+            sample number of X
+
+        freq_max_y: y object,
+            the class occurs most in classes, which'll be used in predict func
+
+        classes_: y object,
+            the class this node belonged to, set to None if there's two or more classes in y
+
+        feature_values: list,
+            this attribute is the list of all values of all features in X, the form may like:
+            [[a1, a2], [b1, b2], ...] in ID3 node, where a1 and a2 is the feature values in
+            feature a, b1, b2 are the feature values in feature b.
+            In C4.5 or GINI node, the form may like: [[(a1+a2)/2, (a2+a3)/2], [(b1+b2)/2, (b2+b3)/2], ...],
+            here a1,a2,b1,b2 has the same meaning in ID3 node, due to the binary attribute of C4.5 or
+            GINI tree, we choose the median of near values to split current node.
+
+        loc: list,
+            loc is a corresponding attribute to attribute feature_values, which records the index of
+            each value in it. For example, a feature_values like [[a1, a2], [b1, b2], ...] may create
+            a loc like [(0,1),(0,2),(1,1),(1,2)], where (0,1)->a1,(0,2)->a2, etc.
+
+        optimal_decision_feature: tuple,
+            if it's a ID3 node, it'll be a tuple like (k, ), which means it uses the kth feature of
+            X to split current node
+            if it's a C4.5 or GINI node, it'll be a tuple like (k, v), which means it
+
+        children: dict,
+            children of this node when "divide" is performed
+        """
         # X, y = Check_X_y(X, y)
-        self.X = X  # 每个节点对应的训练集
-        self.y = y  # 训练集对应的样本分类
-        self.depth = depth  # 每个节点在树中的高度，初始化为0
-        self.max_depth = max_depth
+        self.X = X
+        self.y = y
+        self.depth = depth
         n_samples = X.shape[0]
-        self.n_samples = n_samples  # 训练集数量
-        classifiers, count = np.unique(y, return_counts=True)
-        self.freq_max_y = classifiers[0] if len(classifiers) > 0 else classifiers  # 该节点中样本最多的类，主要在predict中使用
-        self.classifier = classifiers[0] if len(classifiers) == 1 else None  # 该节点所对应的类别，如果y中有不止一个分类则返回None
-        self.children = {}  # 训练集的子节点，由split动态生成
-        self.split_features = None
-        self.features = list()
-        self.feature_chosen = list()
+        self.n_samples = n_samples
+        classes = np.unique(y)
+        self.freq_max_y = classes[0] if len(classes) > 0 else classes
+        self.classes_ = classes[0] if len(classes) == 1 else None
+        self.optimal_decision_feature = None
+        self.feature_values = list()
         self.loc = list()
         self.criterion = ""
 
     def ent(self):
-        """该样本集合的信息熵
+        """entropy of samples in this node
 
-        信息熵定义为 Ent(D) = -sum(p_k * log2(p_k))，其中p_k为第k类样本所占的比例
+        entropy is defined as Ent(D) = -sum(p_k * log2(p_k)), where p_k is ratio of the kth sample
+        contained in all samples.
         :return:
         """
         classes_and_counts = np.unique(self.y, return_counts=True)
@@ -56,41 +89,46 @@ class Node(object):
         return entropy_of_sample
 
     def _feature_choose(self, loc) -> collections.Iterable:
-        """选择X的第k个属性进行分割，生成Dv
+        """choose the index that loc means, and divide current node by self.features[index]
 
-        假设根据第k个属性，原样本可以被划分为m个集合，则每次for循环生成
-        其中一个叶节点集合
-        :param loc:
-        :return:
+        if we can divide current node by self.features[index] into m subsets, then each loop
+        in outer for loop will create one of these subsets.
+
+        see loc in docstrings of __init__ method.
         """
         if hasattr(loc, "__len__"):
             features_k, value_v = loc
-            if features_k < 0 or features_k >= len(self.features):
-                raise ValueError("No such features.")
-            if value_v < 0 or value_v >= len(self.features[features_k]):
-                raise ValueError("No such value in that features.")
+            if features_k < 0 or features_k >= len(self.feature_values):
+                raise ValueError("No such feature_values.")
+            if value_v < 0 or value_v >= len(self.feature_values[features_k]):
+                raise ValueError("No such value in that feature_values.")
             for i in range(2):
-                index = (self.X[:, features_k] <= self.features[features_k][value_v])
+                index = (self.X[:, features_k] <= self.feature_values[features_k][value_v])
                 if not i:
                     X = self.X[index]
                     y = self.y[index]
-                    attr = "X[{}] <= {}".format(features_k, self.features[features_k][value_v])
+                    attr = "X[{}] <= {}".format(features_k, self.feature_values[features_k][value_v])
                 else:
                     X = self.X[~index]
                     y = self.y[~index]
-                    attr = "X[{}] > {}".format(features_k, self.features[features_k][value_v])
-                yield attr, NodeByC4_dot_5(X, y, self.depth + 1, self.max_depth)
+                    attr = "X[{}] > {}".format(features_k, self.feature_values[features_k][value_v])
+                yield attr, self.__class__(X, y, self.depth + 1)
         else:
-            if loc < 0 or loc >= len(self.features):
-                raise ValueError("No such features.")
-            for attr in self.features[loc]:
+            if loc < 0 or loc >= len(self.feature_values):
+                raise ValueError("No such feature_values.")
+            for attr in self.feature_values[loc]:
                 attr = "X[{}] = {}".format(loc, attr)
                 index = (self.X[:, loc] == attr)
                 X = self.X[index]  # 找到每个属性值包含的训练集
                 y = self.y[index]  # 该属性值包含的训练集对应的类别
-                yield attr, NodeByID3(X, y, self.depth + 1, self.max_depth)
+                yield attr, self.__class__(X, y, self.depth + 1)
 
     def gain(self, loc):
+        """entropy gain of current node
+
+        this func return the entropy gain of current node if we divide it by self.features[index],
+        where index is represented by loc, see loc in docstrings of __init__ method
+        """
         res = self.ent()
         for _, each in self._feature_choose(loc):
             res -= each.n_samples / self.n_samples * each.ent()
@@ -98,68 +136,110 @@ class Node(object):
 
     @abstractmethod
     def decision_basis(self, loc) -> float:
+        """strategy about how to divide a node
+
+        it should be overloaded in child class.
+
+        In ID3 tree, it's information gain
+
+        In C4.5 tree, it's information gain ratio
+
+        In GINI tree, it's gini index
+        """
         pass
 
     def get_best_split_feature(self):
-        if self.classifier is not None:
+        """get the optimal feature index
+
+        The code could be displayed in mathematical form like this:
+        arg max decision_basis(loc)
+
+        see loc in docstring of __init__ method
+        """
+        if self.classes_ is not None:
             raise ValueError()
-        index, _ = max(enumerate(map(self.decision_basis, self.loc)), key=lambda p: p[1])
+        index = np.argmax(list(map(self.decision_basis, self.loc)))
         return self.loc[index]  # 选择最优属性
 
     def depth_first_fit(self):
+        """depth first search. Using a stack to store the tree node to avoid overflow
+
+        The specific step could be listed as:
+        1. push the root node to stack;
+        2. while the stack is not empty, pop the tree node up, here we use currNode
+        to label the node pop up;
+        3. find the optimal division attribute of currNode;
+        4. divide currNode by the optimal division attribute, also we could get the
+        childNode of the currNode when we divide
+        5. push the childNode to stack, and go to step 2;
+        """
         DFS = list()
         DFS.append(self)
         while len(DFS) > 0:
             currNode = DFS.pop()
             if currNode.classifier is None:
-                best_features = currNode.get_best_split_feature()
-                currNode.set_split_features(best_features)
+                best_feature = currNode.get_best_split_feature()
+                currNode.divide(best_feature)
                 for child in currNode.children:
                     DFS.append(currNode.children[child])
 
-    def breadth_first_fit(self):
+    def breadth_first_fit(self, max_depth):
+        """breadth first search, used when specific max_depth or max_leafNode(in future) has been set.
+
+        The specific step could be listed as:
+        1. enqueue the root node to queue;
+        2. while the queue is not empty or depth less than the max_depth, dequeue
+        the tree node, here we use currNode to label the node dequeued;
+        3. find the optimal division attribute of currNode;
+        4. divide currNode by the optimal division attribute, also we could get the
+        childNode of the currNode when we divide;
+        5. enqueue the childNode to queue, and go to step 2;
+        """
         BFS = Queue()
         BFS.put(self)
         depth = 0
-        while depth < self.max_depth and not BFS.empty():
+        while depth < max_depth and not BFS.empty():
             currNode = BFS.get()
             if currNode.classifier is None:
-                best_features = currNode.get_best_split_feature()  # 选择最优属性
-                currNode.set_split_features(best_features)  # 用该最优属性进行划分
+                best_features = currNode.get_best_split_feature()
+                currNode.divide(best_features)
                 for child in currNode.children:
                     BFS.put(currNode.children[child])
             depth = currNode.depth
 
-    def set_split_features(self, loc):
-        self.split_features = loc
-        (features_k, value_v) = (loc[0], loc[1]) if hasattr(loc, "__len__") else (-1, -1)
+    def divide(self, loc):
+        """divide current node by self.features[index], where index is represented by loc
+
+        see loc in docstrings of __init__ method.
+        """
+        features_k, value_v = loc
+        self.optimal_decision_feature = (features_k, self.feature_values[features_k][value_v])
+        # (features_k, value_v) = (loc[0], loc[1]) if hasattr(loc, "__len__") else (-1, -1)
+        self.children = dict()
         for i, (attr, each) in enumerate(self._feature_choose(loc)):
             self.children[attr] = each
-            self.children[attr].feature_chosen = copy.deepcopy(self.feature_chosen)
-            if features_k > -1:
-                while 0 <= value_v < len(self.feature_chosen[features_k]):
-                    self.children[attr].feature_chosen[features_k][value_v] = True
-                    value_v += 1 if not i else -1
-            else:
-                self.children[attr].feature_chosen[loc] = True
 
-    def fit(self):
-        if self.max_depth is not None:
-            self.breadth_first_fit()
+    def fit(self, max_depth=None):
+        """fit root node
+
+        choose which method(BFS or DFS) depends on whether max depth is None
+        """
+        if max_depth is not None:
+            self.breadth_first_fit(max_depth)
         else:
             self.depth_first_fit()
 
     def __repr__(self):
-        if hasattr(self.split_features, "__len__"):
-            features_k, value_v = self.split_features
+        if hasattr(self.optimal_decision_feature, "__len__"):
+            features_k, value_v = self.optimal_decision_feature
             info = ["X[{}] <= {}"]
-            toshow = [(features_k, self.features[features_k][value_v])]
+            toshow = [(features_k, self.feature_values[features_k][value_v])]
         else:
             info = [{}]
-            toshow = [self.split_features]
-        info.extend(['{} = {}', 'samples = {}', 'classifier = {}'])
-        toshow.extend([(self.criterion, self.decision_basis(self.split_features)), (self.n_samples, ),
-                       (self.classifier, )])
+            toshow = [self.optimal_decision_feature]
+        info.extend(['{} = {}', 'samples = {}', 'classes_ = {}'])
+        toshow.extend([(self.criterion, self.decision_basis(self.optimal_decision_feature)), (self.n_samples,),
+                       (self.classes_,)])
         for i in range(4):
             info[i] = info[i].format(*toshow[i])
         return '[' + '\n'.join(info) + ']'
@@ -169,53 +249,48 @@ class Node(object):
 
 
 class NodeByID3(Node):
-    """基于ID3决策树算法的模型
+    """decision tree model based on ID3
 
-    最优属性划分采用的是信息熵增益的方法（注意与C4.5信息熵增益率的区别）
-    只能用于非连续属性的划分（实际上二分法对这个应该没有限制，我也不懂为什么都说ID3不能处理连续值）
+    only adapted to discrete feature
     """
 
-    def __init__(self, X, y, depth=0, max_depth=None):
-        super(NodeByID3, self).__init__(X, y, depth=depth, max_depth=max_depth)
+    def __init__(self, X, y, depth=0):
+        super(NodeByID3, self).__init__(X, y, depth=depth)
         self.criterion = "entropy"
         n_samples, n_features = X.shape
         for i in range(n_features):
-            self.features.append(np.unique(X[:, i]))
-            self.feature_chosen.append(False)
+            self.feature_values.append(np.unique(X[:, i]))
             self.loc.append(i)
 
     def decision_basis(self, loc):
-        if self.feature_chosen[loc]:
-            return 0
         return self.gain(loc)
 
 
 class NodeByC4_dot_5(Node):
-    """基于C4.5决策树算法的模型
+    """decision tree model based on C4.5
 
-    最优属性划分采用信息熵增益率的方法（注意与ID3信息熵增益的区别）
-    可以处理连续变量
+    adapted to numerical features
     """
-    def __init__(self, X, y, depth=0, max_depth=None):
-        super(NodeByC4_dot_5, self).__init__(X, y, depth=depth, max_depth=max_depth)
+    def __init__(self, X, y, depth=0):
+        super(NodeByC4_dot_5, self).__init__(X, y, depth=depth)
         self.criterion = "gain ratio"
         n_samples, n_features = X.shape
         for i in range(n_features):
             values = np.unique(X[:, i])
             feature_i = list(_median(values))
-            self.features.append(feature_i)
-            self.feature_chosen.append([False] * len(values))
+            self.feature_values.append(feature_i)
             p = [i] * len(feature_i)
             q = range(len(feature_i))
             self.loc.extend(list(zip(p, q)))
 
     def _IV(self, features_k):
-        """属性k的固有值（intrinsic value）
+        """intrinsic value of feature k
 
-        公式为IV(fea_k) = -sum(freq(Dv) * log2(freq(Dv)))，其中Dv为属性k的第v个取值，freq(Dv)代表该取值的频率
-        一般来说属性值越多，IV会越大，所以基于增益率的C4.5改进了ID3偏向于选择属性值较多的属性的缺陷
-        :param features_k:
-        :return:
+        the mathematical form is IV(fea_k) = -sum(freq(Dv) * log2(freq(Dv))), where Dv is the subset of
+        samples whose feature[k] = feature[k][v], freq(Dv) means the frequency of Dv
+
+        In general, if there were more values in feature k, IV would be greater, so C4.5 tree based on
+        info gain ratio improve the tendency that ID3 tree prefer to features that has more values.
         """
         n_samples, _ = self.X.shape
         _, value_samples = np.unique(self.X[:, features_k], return_counts=True)
@@ -224,8 +299,6 @@ class NodeByC4_dot_5(Node):
 
     def decision_basis(self, loc):
         features_k, value_v = loc
-        if self.feature_chosen[features_k][value_v]:
-            return 0
         gain = self.gain(loc)
         IV = self._IV(features_k)
         if not gain or not IV:
@@ -233,18 +306,38 @@ class NodeByC4_dot_5(Node):
         return gain / IV
 
 
+class NodeByGini(NodeByC4_dot_5):
+    def __init__(self, X, y, depth=0):
+        super(NodeByGini, self).__init__(X, y, depth=depth)
+        self.criterion = 'gini'
+
+    def gini(self):
+        classifiers, count = np.unique(self.y, return_counts=True)
+        return 1 - np.sum(np.power(count / self.n_samples, 2))
+
+    def decision_basis(self, loc):
+        res = 0
+        for _, each in self._feature_choose(loc):
+            res -= each.n_samples / self.n_samples * each.gini()
+        return res
+
+
 class DecisionTreeClassifier(object):
 
     def __init__(self, criterion='ID3', attributes=None, max_depth=None):
+        if criterion.lower() not in ['id3', 'c4.5', 'gini']:
+            raise ValueError()
         self.criterion = criterion
         self.attributes = attributes
         self.max_depth = max_depth
 
     def fit(self, X, y):
-        if self.criterion == 'ID3':
-            self.tree_ = NodeByID3(X, y, max_depth=self.max_depth)
-        elif self.criterion == 'C4.5':
-            self.tree_ = NodeByC4_dot_5(X, y, max_depth=self.max_depth)
+        if self.criterion.upper() == 'ID3':
+            self.tree_ = NodeByID3(X, y)
+        elif self.criterion.upper() == 'C4.5':
+            self.tree_ = NodeByC4_dot_5(X, y)
+        elif self.criterion.upper() == 'GINI':
+            self.tree_ = NodeByGini(X, y)
         self.tree_.fit()
 
     def predict(self, X):
@@ -260,10 +353,10 @@ class DecisionTreeClassifier(object):
         res = np.zeros(X.shape[0], dtype=self.tree_.y.dtype)
         for i, e in enumerate(X):
             currNode = self.tree_
-            while currNode.classifier is None and currNode.depth < max_depth:  # 节点不是叶节点
-                features_k, value_v = currNode.split_features
-                symbol = "<=" if e[features_k] <= currNode.features[features_k][value_v] else ">"
-                attr = "X[{}] {} {}".format(features_k, symbol, currNode.features[features_k][value_v])
+            while currNode.classes_ is None and currNode.depth < max_depth:  # current node is not the leaf node
+                features_k, value = currNode.optimal_decision_feature
+                symbol = "<=" if e[features_k] <= value else ">"
+                attr = "X[{}] {} {}".format(features_k, symbol, value)
                 currNode = currNode.children[attr]
-            res[i] = currNode.classifier if currNode.classifier else currNode.freq_max_y
+            res[i] = currNode.classes_ if currNode.classes_ else currNode.freq_max_y
         return res
