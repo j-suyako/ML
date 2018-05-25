@@ -177,7 +177,7 @@ class Node(object):
         DFS.append(self)
         while len(DFS) > 0:
             currNode = DFS.pop()
-            if currNode.classifier is None:
+            if currNode.classes_ is None:
                 best_feature = currNode.get_best_split_feature()
                 currNode.divide(best_feature)
                 for child in currNode.children:
@@ -200,7 +200,7 @@ class Node(object):
         depth = 0
         while depth < max_depth and not BFS.empty():
             currNode = BFS.get()
-            if currNode.classifier is None:
+            if currNode.classes_ is None:
                 best_features = currNode.get_best_split_feature()
                 currNode.divide(best_features)
                 for child in currNode.children:
@@ -212,8 +212,7 @@ class Node(object):
 
         see loc in docstrings of __init__ method.
         """
-        features_k, value_v = loc
-        self.optimal_decision_feature = (features_k, self.feature_values[features_k][value_v])
+        self.optimal_decision_feature = loc
         # (features_k, value_v) = (loc[0], loc[1]) if hasattr(loc, "__len__") else (-1, -1)
         self.children = dict()
         for i, (attr, each) in enumerate(self._feature_choose(loc)):
@@ -354,7 +353,8 @@ class DecisionTreeClassifier(object):
         for i, e in enumerate(X):
             currNode = self.tree_
             while currNode.classes_ is None and currNode.depth < max_depth:  # current node is not the leaf node
-                features_k, value = currNode.optimal_decision_feature
+                features_k, value_v = currNode.optimal_decision_feature
+                value = currNode.feature_values[features_k][value_v]
                 symbol = "<=" if e[features_k] <= value else ">"
                 attr = "X[{}] {} {}".format(features_k, symbol, value)
                 currNode = currNode.children[attr]
