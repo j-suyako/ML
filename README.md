@@ -1,3 +1,11 @@
 # MACHINE-LEARNING
 
-根据西瓜书与sklearn的api编写的机器学习库，预计将实现书中的大部分算法（如果时间足够的话）。
+Personal machine learning library based on the watermelon book from Zhou, and imitate the API of sklearn. If time is adequate, I'll try my best to achieve most of the algorithms in watermelon book.
+
+* ~~logistic regression~~
+* ~~decision tree~~
+* ~~neural network~~
+* ~~svm~~
+* bayes -> skip temparary
+* ensemble -> now I'm here!
+* clustering
