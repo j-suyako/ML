@@ -72,14 +72,34 @@ class BootStrapping(object):
     自助法适用于数据集较小，难以有效划分训练/测试集时比较有用，但自助法改变了初始
     数据集的分布，因此在数据量足够时应采用留出法和交叉验证法
     """
-    def split(self, X):
+    @staticmethod
+    def split(X, sample_weights=None, iter_num=None):
         if X is None:
             raise ValueError("The 'X' parameter should not be none.")
-        indices = []
         n_samples = _num_samples(X)
-        for i in range(n_samples):
-            indices.append(np.random.randint(n_samples))
+        if iter_num is None:
+            iter_num = n_samples
+        if sample_weights is not None:
+            weights = sample_weights / sum(sample_weights)
+            indices = list(map(BootStrapping.func, BootStrapping.loop(weights, iter_num)))
+        else:
+            indices = list(map(np.random.randint, BootStrapping.loop(n_samples, iter_num)))
         return indices, list(set(np.arange(n_samples)) - set(indices))
+
+    @staticmethod
+    def func(sample_weights):
+        threshold = np.random.random() * sum(sample_weights)
+        curr = 0
+        index = 0
+        while curr < threshold:
+            curr += sample_weights[index]
+            index += 1
+        return index - 1
+
+    @staticmethod
+    def loop(data, iter_num):
+        for _ in range(iter_num):
+            yield data
 
 
 def train_test_split(X, y, test_size=0.3, shuffle=False):
