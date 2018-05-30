@@ -1,4 +1,4 @@
-from ensemble.bagging import BaggingClassifier
+from ensemble import BaggingClassifier, AdaBoostClassifier
 from matplotlib import pyplot as plt
 import numpy as np
 import pandas as pd
@@ -7,8 +7,9 @@ from sklearn.datasets import load_iris
 from tree.tree import DecisionTreeClassifier
 
 # define the base estimator and bagging classifier
-base_classifier = DecisionTreeClassifier(criterion='C4.5', max_depth=1)
+base_classifier = DecisionTreeClassifier(criterion='C4.5', max_depth=2)
 classifier1 = BaggingClassifier(base_estimator=base_classifier, n_estimators=5)
+classifier2 = AdaBoostClassifier(base_estimator=base_classifier, n_estimators=5)
 
 
 # define functions to decide which data to be estimated
@@ -25,6 +26,7 @@ def get_watermelon():
     watermelon_data = pd.read_csv(r"water_melon.csv", encoding='gbk')
     X = watermelon_data.values[:, :-1].astype('float')
     y = (watermelon_data.values[:, -1] == '是').astype('int')
+    y[y == 0] = -1
     X = scale(X)
     return X, y
 
@@ -51,15 +53,20 @@ for classes, color in zip(np.unique(y), colors):
     plt.scatter(X[idx, 0], X[idx, 1], c=color)
 
 # fit sample and plot the decision boundary
-classifier1.fit(X, y)
-for estimator in classifier1.estimators_:
-    loc = estimator.tree_.optimal_decision_feature
-    feature_k, value_v = loc
-    value = estimator.tree_.feature_values[feature_k][value_v]
-    if feature_k:
-        plt.plot([x_min, x_max], [value, value], color='r')
-    else:
-        plt.plot([value, value], [y_min, y_max], color='r')
+classifier = classifier2
+classifier.fit(X, y)
+# for estimator in classifier.estimators_:
+#     loc = estimator.tree_.optimal_decision_feature
+#     feature_k, value_v = loc
+#     value = estimator.tree_.feature_values[feature_k][value_v]
+#     if feature_k:
+#         plt.plot([x_min, x_max], [value, value], color='r')
+#     else:
+#         plt.plot([value, value], [y_min, y_max], color='r')
+xx, yy = np.meshgrid(np.arange(x_min, x_max, 0.02), np.arange(y_min, y_max, 0.02))
+Z = classifier.predict(np.c_[xx.ravel(), yy.ravel()])
+Z = Z.reshape(xx.shape)
+plt.contourf(xx, yy, Z, alpha=0.5)
 
 # show the diagram
 plt.show()

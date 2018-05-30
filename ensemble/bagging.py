@@ -16,14 +16,12 @@ class BaggingClassifier(object):
         self.n_estimators = n_estimators
 
     def fit(self, X, y):
-        bootstrap = BootStrapping()
-        estimators = list()
+        self.estimators_ = list()
         for i in range(self.n_estimators):
-            indices, _ = bootstrap.split(X)
+            indices, _ = BootStrapping.split(X)
             estimator = clone(self.base_estimator)
             estimator.fit(X[indices], y[indices])
-            estimators.append(estimator)
-        self.estimators_ = estimators
+            self.estimators_.append(estimator)
 
     def predict(self, X):
         if not hasattr(self, "estimators_"):
